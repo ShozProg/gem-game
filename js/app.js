@@ -9,9 +9,9 @@
     let validMoves = [];
     let isFlipped = false;
     let pendingPromotion = null;
-    let gameMode = 'ai'; // 'ai' | 'hotseat' | 'p2p-host' | 'p2p-guest'
+    let gameMode = 'ai'; // 'ai' | 'hotseat' | 'p2p-host' | 'p2p-guest' | 'connecting'
     let aiDifficulty = 'medium'; // 'easy' | 'medium' | 'hard'
-    let myColor = 'w'; // 'w' | 'b' | null
+    let myColor = 'w'; // 'w' | 'b'
     let isGameOver = false;
     let isAiThinking = false;
 
@@ -66,17 +66,18 @@
         }
 
         bindEvents();
-        setupUrlAutoJoin();
+        setupP2PListeners();
 
-        // Default start: play against AI as White
-        startNewGame('ai', 600000, 0, 'w', 'medium');
-    }
-
-    function setupUrlAutoJoin() {
+        // Check if user opened page via an invite link: ?game=XYZ or ?room=XYZ
         const urlParams = new URLSearchParams(window.location.search);
         const joinRoom = urlParams.get('game') || urlParams.get('room');
+
         if (joinRoom) {
-            joinOnlineGame(joinRoom);
+            console.log('[App] Auto-joining room from URL:', joinRoom);
+            prepareP2PJoin(joinRoom);
+        } else {
+            // Default: offline game with AI
+            startNewGame('ai', 600000, 0, 'w', 'medium');
         }
     }
 
@@ -130,7 +131,7 @@
             modalGameOver.classList.remove('active');
             if (gameMode.startsWith('p2p')) {
                 window.chessP2P.send('rematch-offer');
-                showToast('Предложение реванша отправлено');
+                showToast('Предложение реванша отправлено сопернику');
             } else if (gameMode === 'ai') {
                 startNewGame('ai', timeControl.baseMs, timeControl.incMs, myColor, aiDifficulty);
             } else {
@@ -141,8 +142,6 @@
         document.getElementById('btn-gameover-close').addEventListener('click', () => {
             modalGameOver.classList.remove('active');
         });
-
-        setupP2PListeners();
     }
 
     /* ==========================================================================
@@ -163,10 +162,12 @@
         modalLobby.classList.remove('active');
 
         if (mode === 'ai') {
+            window.chessP2P.disconnect();
             startNewGame('ai', baseMs, incMs, colorChoice, diffChoice);
             const sideName = colorChoice === 'w' ? 'белыми' : 'черными';
             showToast(`Игра с ботом (${diffChoice}) началась. Вы играете ${sideName}!`);
         } else if (mode === 'hotseat') {
+            window.chessP2P.disconnect();
             startNewGame('hotseat', baseMs, incMs, colorChoice);
             showToast('Начата локальная партия на одном экране');
         } else if (mode === 'p2p-create') {
@@ -177,12 +178,33 @@
                 showToast('Введите код комнаты или ссылку');
                 return;
             }
-            joinOnlineGame(rawRoom);
+            prepareP2PJoin(rawRoom);
         }
     }
 
     function createOnlineGame(baseMs, incMs, colorChoice) {
         window.chessP2P.disconnect();
+        clearInterval(clockTimer);
+
+        // Switch mode to host immediately so bot NEVER triggers
+        gameMode = 'p2p-host';
+        myColor = colorChoice;
+        timeControl = { baseMs, incMs };
+        isAiThinking = false;
+        isGameOver = false;
+
+        // Reset board for upcoming game
+        chess = new Chess();
+        selectedSquare = null;
+        validMoves = [];
+        isFlipped = (myColor === 'b');
+        renderBoard();
+        updateGameBadges();
+        updatePlayerBars();
+
+        statusBanner.className = 'status-banner';
+        statusText.textContent = '⏳ Создание онлайн-комнаты...';
+
         window.chessP2P.initHost(null, (roomId) => {
             const shareUrl = `${window.location.origin}${window.location.pathname}?game=${roomId}`;
             document.getElementById('modal-share-link').value = shareUrl;
@@ -190,50 +212,111 @@
             shareContainer.style.display = 'block';
             modalWaiting.classList.add('active');
 
-            timeControl = { baseMs, incMs };
-            myColor = colorChoice;
-            gameMode = 'p2p-host';
-            showToast(`Комната создана! Код: ${roomId}`);
+            statusBanner.className = 'status-banner';
+            statusText.textContent = `⏳ Ожидание соперника (код: ${roomId})`;
+            showToast(`Комната создана! Отправьте ссылку другу.`);
         });
     }
 
-    function joinOnlineGame(roomIdInput) {
-        let roomId = roomIdInput;
+    function prepareP2PJoin(rawRoomInput) {
+        window.chessP2P.disconnect();
+        clearInterval(clockTimer);
+
+        // Parse ID from URL or text
+        let roomId = rawRoomInput.trim();
         if (roomId.includes('game=')) {
-            roomId = new URL(roomId).searchParams.get('game');
+            try {
+                roomId = new URL(roomId).searchParams.get('game');
+            } catch (e) {
+                roomId = roomId.split('game=')[1].split('&')[0];
+            }
         } else if (roomId.includes('room=')) {
-            roomId = new URL(roomId).searchParams.get('room');
+            try {
+                roomId = new URL(roomId).searchParams.get('room');
+            } catch (e) {
+                roomId = roomId.split('room=')[1].split('&')[0];
+            }
         }
 
-        window.chessP2P.disconnect();
-        showToast('Подключение к сопернику...');
+        roomId = roomId.trim().toLowerCase();
+        if (!roomId.startsWith('gem-')) {
+            roomId = `gem-${roomId}`;
+        }
+
+        // Set state to connecting P2P guest - bot MUST NOT run!
+        gameMode = 'connecting';
+        isAiThinking = false;
+        isGameOver = false;
+        chess = new Chess();
+        selectedSquare = null;
+        validMoves = [];
+        renderBoard();
+
+        gameModeBadge.textContent = '🌐 Подключение...';
+        gameModeBadge.style.background = '#eab308';
+        statusBanner.className = 'status-banner';
+        statusText.textContent = `🔄 Подключение к комнате ${roomId}...`;
+        topName.textContent = 'Соперник (Ожидание)';
+        bottomName.textContent = 'Вы (Подключение)';
+
+        showToast(`Подключение к комнате ${roomId}...`);
         window.chessP2P.connectToHost(roomId);
     }
 
     function setupP2PListeners() {
+        // When WebRTC connection is opened
         window.chessP2P.on('connected', ({ isHost }) => {
+            console.log('[App] P2P Connected callback! isHost =', isHost);
             modalWaiting.classList.remove('active');
             window.chessAudio.playNotify();
 
             if (isHost) {
-                const guestColor = myColor === 'w' ? 'b' : 'w';
-                window.chessP2P.send('game-init', {
-                    guestColor: guestColor,
-                    baseMs: timeControl.baseMs,
-                    incMs: timeControl.incMs
-                });
+                // Host determines guest color
+                const guestColor = (myColor === 'w') ? 'b' : 'w';
+                console.log('[App] Host sending game-init to guest. guestColor =', guestColor);
+
+                const sendInit = () => {
+                    window.chessP2P.send('game-init', {
+                        guestColor: guestColor,
+                        baseMs: timeControl.baseMs,
+                        incMs: timeControl.incMs
+                    });
+                };
+
+                sendInit();
+                // Send twice with slight delay to guarantee delivery across initial WebRTC handshake
+                setTimeout(sendInit, 250);
+
                 startNewGame('p2p-host', timeControl.baseMs, timeControl.incMs, myColor);
                 showToast('Соперник подключился! Партия началась.');
             }
         });
 
-        window.chessP2P.on('msg:game-init', (data) => {
-            myColor = data.guestColor;
-            startNewGame('p2p-guest', data.baseMs, data.incMs, myColor);
-            showToast(`Вы подключились к игре! Вы играете ${myColor === 'w' ? 'белыми' : 'черными'}.`);
+        // Guest says hello
+        window.chessP2P.on('msg:guest-join', () => {
+            console.log('[App] Host received guest-join! Resending game-init...');
+            const guestColor = (myColor === 'w') ? 'b' : 'w';
+            window.chessP2P.send('game-init', {
+                guestColor: guestColor,
+                baseMs: timeControl.baseMs,
+                incMs: timeControl.incMs
+            });
         });
 
+        // Guest receives configuration from host
+        window.chessP2P.on('msg:game-init', (data) => {
+            console.log('[App] Guest received game-init:', data);
+            myColor = data.guestColor;
+            timeControl = { baseMs: data.baseMs, incMs: data.incMs };
+
+            startNewGame('p2p-guest', data.baseMs, data.incMs, myColor);
+            window.chessAudio.playNotify();
+            showToast(`Успешное подключение! Вы играете ${myColor === 'w' ? 'белыми' : 'черными'}.`);
+        });
+
+        // Move received over P2P
         window.chessP2P.on('msg:move', (data) => {
+            console.log('[App] Received move from opponent:', data);
             const move = chess.move({
                 from: data.from,
                 to: data.to,
@@ -241,15 +324,23 @@
             });
 
             if (move) {
-                clocks = data.clocks;
+                if (data.clocks) {
+                    clocks = data.clocks;
+                }
                 handleMoveSound(move);
                 onMoveComplete(move);
+            } else if (data.fen) {
+                // Fallback sync if discrepancy
+                console.warn('[App] Move failed locally, syncing FEN:', data.fen);
+                chess.load(data.fen);
+                renderBoard();
+                updateStatus();
             }
         });
 
         window.chessP2P.on('msg:resign', () => {
             const winner = myColor === 'w' ? 'Белые' : 'Черные';
-            endGame(`Соперник сдался. Победили ${winner}!`, 'Сдача');
+            endGame(`Соперник сдался. Победили ${winner}!`, 'Сдача соперника');
         });
 
         window.chessP2P.on('msg:offer-draw', () => {
@@ -263,7 +354,7 @@
         });
 
         window.chessP2P.on('msg:accept-draw', () => {
-            endGame('Соперник согласился на ничью.', 'Ничья');
+            endGame('Соперник согласился на ничью.', 'Ничья по соглашению');
         });
 
         window.chessP2P.on('msg:decline-draw', () => {
@@ -272,14 +363,14 @@
 
         window.chessP2P.on('msg:rematch-offer', () => {
             if (confirm('Соперник предлагает реванш. Начать новую партию со сменой цветов?')) {
-                myColor = myColor === 'w' ? 'b' : 'w';
+                myColor = (myColor === 'w') ? 'b' : 'w';
                 window.chessP2P.send('rematch-accept', { myNewColor: myColor });
                 startNewGame(gameMode, timeControl.baseMs, timeControl.incMs, myColor);
             }
         });
 
         window.chessP2P.on('msg:rematch-accept', (data) => {
-            myColor = data.myNewColor === 'w' ? 'b' : 'w';
+            myColor = (data.myNewColor === 'w') ? 'b' : 'w';
             startNewGame(gameMode, timeControl.baseMs, timeControl.incMs, myColor);
             showToast('Реванш принят! Новая партия началась.');
         });
@@ -288,12 +379,17 @@
             if (!isGameOver && gameMode.startsWith('p2p')) {
                 showToast('Соперник отключился от игры.');
                 statusBanner.className = 'status-banner alert-check';
-                statusText.textContent = 'Соперник отключился';
+                statusText.textContent = 'Соперник отключился от партии';
             }
         });
 
         window.chessP2P.on('error', (err) => {
-            showToast(`Ошибка: ${err}`);
+            console.error('[App] P2P Error:', err);
+            showToast(err);
+            if (gameMode === 'connecting') {
+                statusBanner.className = 'status-banner alert-check';
+                statusText.textContent = 'Ошибка подключения к комнате';
+            }
         });
     }
 
@@ -301,6 +397,7 @@
        Game Flow & Board Logic
        ========================================================================== */
     function startNewGame(mode, baseMs, incMs, playerColor = 'w', difficulty = 'medium') {
+        console.log(`[App] startNewGame: mode=${mode}, color=${playerColor}, time=${baseMs}`);
         chess = new Chess();
         selectedSquare = null;
         validMoves = [];
@@ -346,6 +443,10 @@
             gameModeBadge.textContent = '👥 Hotseat';
             gameModeBadge.style.background = '#64748b';
             shareContainer.style.display = 'none';
+        } else if (gameMode === 'connecting') {
+            gameModeBadge.textContent = '🌐 Подключение...';
+            gameModeBadge.style.background = '#eab308';
+            shareContainer.style.display = 'none';
         } else {
             gameModeBadge.textContent = '🌐 P2P Онлайн';
             gameModeBadge.style.background = '#3b82f6';
@@ -374,7 +475,13 @@
             topName.textContent = isWhiteAtBottom ? 'Черные' : 'Белые';
             bottomAvatar.textContent = isWhiteAtBottom ? '♔' : '♚';
             topAvatar.textContent = isWhiteAtBottom ? '♚' : '♔';
+        } else if (gameMode === 'connecting') {
+            bottomName.textContent = 'Вы';
+            topName.textContent = 'Соперник (Подключение...)';
+            bottomAvatar.textContent = '♟';
+            topAvatar.textContent = '⏳';
         } else {
+            // Online P2P
             if (myColor === 'w') {
                 bottomName.textContent = 'Вы (Белые)';
                 topName.textContent = 'Соперник (Черные)';
@@ -470,13 +577,14 @@
     }
 
     function canControlPiece(pieceColor) {
+        if (gameMode === 'connecting') return false;
         if (gameMode === 'hotseat') return true;
         if (gameMode === 'ai') return pieceColor === myColor && !isAiThinking;
-        return pieceColor === myColor;
+        return pieceColor === myColor; // Online P2P
     }
 
     function isMyTurn() {
-        if (isGameOver || isAiThinking) return false;
+        if (isGameOver || isAiThinking || gameMode === 'connecting') return false;
         if (gameMode === 'hotseat') return true;
         return chess.turn() === myColor;
     }
@@ -499,7 +607,7 @@
        User Interactions
        ========================================================================== */
     function handleSquareClick(square) {
-        if (isGameOver || isAiThinking) return;
+        if (isGameOver || isAiThinking || gameMode === 'connecting') return;
 
         if (selectedSquare) {
             const move = validMoves.find(m => m.to === square);
@@ -612,32 +720,34 @@
 
         handleMoveSound(move);
 
+        // Send move over P2P
         if (gameMode.startsWith('p2p')) {
             window.chessP2P.send('move', {
                 from: move.from,
                 to: move.to,
                 promotion: move.promotion,
-                clocks: clocks
+                clocks: clocks,
+                fen: chess.fen()
             });
         }
 
         onMoveComplete(move);
 
-        // Check if AI turn next
+        // Check if AI turn next (ONLY in AI mode!)
         if (gameMode === 'ai' && !isGameOver && chess.turn() !== myColor) {
             triggerAiMove();
         }
     }
 
     function triggerAiMove() {
+        if (gameMode !== 'ai') return;
         isAiThinking = true;
         statusBanner.className = 'status-banner';
         statusText.textContent = 'Бот рассчитывает ход... 🤔';
 
-        // Add human-like thinking delay (350 - 700ms)
         const delay = Math.floor(Math.random() * 350) + 350;
         setTimeout(() => {
-            if (isGameOver) {
+            if (isGameOver || gameMode !== 'ai') {
                 isAiThinking = false;
                 return;
             }
@@ -822,7 +932,7 @@
         lastClockTick = Date.now();
 
         clockTimer = setInterval(() => {
-            if (isGameOver) {
+            if (isGameOver || gameMode === 'connecting') {
                 clearInterval(clockTimer);
                 return;
             }
@@ -890,7 +1000,7 @@
     }
 
     function handleResign() {
-        if (isGameOver) return;
+        if (isGameOver || gameMode === 'connecting') return;
         if (!confirm('Вы действительно хотите сдаться?')) return;
 
         if (gameMode.startsWith('p2p')) {
@@ -908,12 +1018,11 @@
     }
 
     function handleOfferDraw() {
-        if (isGameOver) return;
+        if (isGameOver || gameMode === 'connecting') return;
         if (gameMode.startsWith('p2p')) {
             window.chessP2P.send('offer-draw');
             showToast('Предложение ничьей отправлено сопернику...');
         } else if (gameMode === 'ai') {
-            // AI evaluates if it's fair or losing
             const evalScore = window.chessAI.evaluateBoard(chess);
             const isAiLosing = (myColor === 'w' && evalScore > 300) || (myColor === 'b' && evalScore < -300);
             if (isAiLosing || Math.abs(evalScore) < 150) {
@@ -950,7 +1059,7 @@
             toast.style.opacity = '0';
             toast.style.transition = 'opacity 0.3s ease';
             setTimeout(() => toast.remove(), 300);
-        }, 3200);
+        }, 3500);
     }
 
     function getNoun(number, one, two, five) {
