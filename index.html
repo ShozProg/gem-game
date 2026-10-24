@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gem Chess — Шахматы онлайн (P2P)</title>
+    <title>Gem Chess — Шахматы онлайн (P2P) и с ботом</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💎</text></svg>">
 </head>
@@ -72,7 +72,7 @@
             <div class="card">
                 <div class="card-title">
                     <span>Статус партии</span>
-                    <span id="game-mode-badge" style="font-size: 0.75rem; background: #3b82f6; padding: 2px 8px; border-radius: 12px;">Локально</span>
+                    <span id="game-mode-badge" style="font-size: 0.75rem; background: #3b82f6; padding: 2px 8px; border-radius: 12px;">Против бота</span>
                 </div>
                 <div class="status-banner" id="status-banner">
                     <span id="status-icon">⚪</span>
@@ -124,9 +124,28 @@
                 <div class="form-group">
                     <label>Режим игры</label>
                     <select class="select" id="select-game-mode">
-                        <option value="hotseat">👥 Игра вдвоем на одном экране (Hotseat)</option>
+                        <option value="ai" selected>🤖 Одиночная игра против бота (AI)</option>
+                        <option value="hotseat">👥 Вдвоем на одном экране (Hotseat)</option>
                         <option value="p2p-create">🌐 Создать онлайн-игру (P2P по ссылке)</option>
                         <option value="p2p-join">🔗 Присоединиться к онлайн-игре</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="group-ai-difficulty">
+                    <label>Сложность бота</label>
+                    <select class="select" id="select-ai-difficulty">
+                        <option value="easy">🟢 Лёгкий (Easy) — для начинающих</option>
+                        <option value="medium" selected>🟡 Средний (Medium) — тактический</option>
+                        <option value="hard">🔴 Сложный (Hard) — глубокий расчет</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="group-color-choice">
+                    <label>Играть за сторону</label>
+                    <select class="select" id="select-color-choice">
+                        <option value="w" selected>⚪ Белые</option>
+                        <option value="b">⚫ Черные</option>
+                        <option value="random">🎲 Случайно</option>
                     </select>
                 </div>
 
@@ -139,15 +158,6 @@
                         <option value="60,1">1 мин + 1 сек (Пуля)</option>
                         <option value="900,10">15 мин + 10 сек (Классика)</option>
                         <option value="0,0">Без ограничения по времени</option>
-                    </select>
-                </div>
-
-                <div class="form-group" id="group-color-choice">
-                    <label>Выбор цвета (для создателя игры)</label>
-                    <select class="select" id="select-color-choice">
-                        <option value="random">🎲 Случайно (Белые или Черные)</option>
-                        <option value="w">⚪ Белые</option>
-                        <option value="b">⚫ Черные</option>
                     </select>
                 </div>
 
@@ -221,6 +231,7 @@
     <script src="js/peerjs.min.js"></script>
     <script src="js/audio.js"></script>
     <script src="js/p2p.js"></script>
+    <script src="js/ai.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

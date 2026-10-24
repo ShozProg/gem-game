@@ -1,16 +1,19 @@
 /**
  * Main Application Controller for Gem Chess
+ * Supports AI Bot (Easy/Medium/Hard), Hotseat, and Online P2P (PeerJS)
  */
 (() => {
     // Game State
-    let chess = new Chess();
+    let chess = null;
     let selectedSquare = null;
     let validMoves = [];
     let isFlipped = false;
     let pendingPromotion = null;
-    let gameMode = 'hotseat'; // 'hotseat' | 'p2p-host' | 'p2p-guest'
-    let myColor = 'w'; // 'w' | 'b' | null (both in hotseat)
+    let gameMode = 'ai'; // 'ai' | 'hotseat' | 'p2p-host' | 'p2p-guest'
+    let aiDifficulty = 'medium'; // 'easy' | 'medium' | 'hard'
+    let myColor = 'w'; // 'w' | 'b' | null
     let isGameOver = false;
+    let isAiThinking = false;
 
     // Time Control State
     let timeControl = { baseMs: 600000, incMs: 0 }; // default 10m + 0s
@@ -48,16 +51,25 @@
     const modalGameOver = document.getElementById('modal-gameover');
     const promoChoicesEl = document.getElementById('promotion-choices');
 
-    // Values of pieces for material count
     const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
     /* ==========================================================================
        Initialization
        ========================================================================== */
     function init() {
+        try {
+            chess = new Chess();
+        } catch (err) {
+            console.error('Failed to create Chess instance', err);
+            showToast('Ошибка загрузки шахматного движка!');
+            return;
+        }
+
         bindEvents();
         setupUrlAutoJoin();
-        startNewGame('hotseat', 600000, 0, 'w');
+
+        // Default start: play against AI as White
+        startNewGame('ai', 600000, 0, 'w', 'medium');
     }
 
     function setupUrlAutoJoin() {
@@ -86,16 +98,12 @@
             const groupTime = document.getElementById('group-time-control');
             const groupColor = document.getElementById('group-color-choice');
             const groupRoom = document.getElementById('group-room-id');
+            const groupAi = document.getElementById('group-ai-difficulty');
 
-            if (val === 'p2p-join') {
-                groupTime.style.display = 'none';
-                groupColor.style.display = 'none';
-                groupRoom.style.display = 'flex';
-            } else {
-                groupTime.style.display = 'flex';
-                groupColor.style.display = val === 'hotseat' ? 'none' : 'flex';
-                groupRoom.style.display = 'none';
-            }
+            groupAi.style.display = (val === 'ai') ? 'flex' : 'none';
+            groupRoom.style.display = (val === 'p2p-join') ? 'flex' : 'none';
+            groupTime.style.display = (val === 'p2p-join') ? 'none' : 'flex';
+            groupColor.style.display = (val === 'p2p-join') ? 'none' : 'flex';
         });
 
         document.getElementById('btn-start-game-confirm').addEventListener('click', handleLobbySubmit);
@@ -123,8 +131,10 @@
             if (gameMode.startsWith('p2p')) {
                 window.chessP2P.send('rematch-offer');
                 showToast('Предложение реванша отправлено');
+            } else if (gameMode === 'ai') {
+                startNewGame('ai', timeControl.baseMs, timeControl.incMs, myColor, aiDifficulty);
             } else {
-                startNewGame('hotseat', timeControl.baseMs, timeControl.incMs, 'w');
+                startNewGame('hotseat', timeControl.baseMs, timeControl.incMs, myColor);
             }
         });
 
@@ -143,13 +153,22 @@
         const timeVal = document.getElementById('select-time-control').value.split(',');
         const baseMs = parseInt(timeVal[0]) * 1000;
         const incMs = parseInt(timeVal[1]) * 1000;
-        const colorChoice = document.getElementById('select-color-choice').value;
+        let colorChoice = document.getElementById('select-color-choice').value;
+        const diffChoice = document.getElementById('select-ai-difficulty').value;
+
+        if (colorChoice === 'random') {
+            colorChoice = Math.random() < 0.5 ? 'w' : 'b';
+        }
 
         modalLobby.classList.remove('active');
 
-        if (mode === 'hotseat') {
-            startNewGame('hotseat', baseMs, incMs, 'w');
-            showToast('Начата локальная партия за одним экраном');
+        if (mode === 'ai') {
+            startNewGame('ai', baseMs, incMs, colorChoice, diffChoice);
+            const sideName = colorChoice === 'w' ? 'белыми' : 'черными';
+            showToast(`Игра с ботом (${diffChoice}) началась. Вы играете ${sideName}!`);
+        } else if (mode === 'hotseat') {
+            startNewGame('hotseat', baseMs, incMs, colorChoice);
+            showToast('Начата локальная партия на одном экране');
         } else if (mode === 'p2p-create') {
             createOnlineGame(baseMs, incMs, colorChoice);
         } else if (mode === 'p2p-join') {
@@ -171,13 +190,8 @@
             shareContainer.style.display = 'block';
             modalWaiting.classList.add('active');
 
-            let assignedColor = colorChoice;
-            if (assignedColor === 'random') {
-                assignedColor = Math.random() < 0.5 ? 'w' : 'b';
-            }
-
             timeControl = { baseMs, incMs };
-            myColor = assignedColor;
+            myColor = colorChoice;
             gameMode = 'p2p-host';
             showToast(`Комната создана! Код: ${roomId}`);
         });
@@ -185,7 +199,6 @@
 
     function joinOnlineGame(roomIdInput) {
         let roomId = roomIdInput;
-        // Support full URLs
         if (roomId.includes('game=')) {
             roomId = new URL(roomId).searchParams.get('game');
         } else if (roomId.includes('room=')) {
@@ -203,7 +216,6 @@
             window.chessAudio.playNotify();
 
             if (isHost) {
-                // Host sends game configuration
                 const guestColor = myColor === 'w' ? 'b' : 'w';
                 window.chessP2P.send('game-init', {
                     guestColor: guestColor,
@@ -222,7 +234,6 @@
         });
 
         window.chessP2P.on('msg:move', (data) => {
-            // Apply opponent's move
             const move = chess.move({
                 from: data.from,
                 to: data.to,
@@ -261,7 +272,6 @@
 
         window.chessP2P.on('msg:rematch-offer', () => {
             if (confirm('Соперник предлагает реванш. Начать новую партию со сменой цветов?')) {
-                // Swap colors
                 myColor = myColor === 'w' ? 'b' : 'w';
                 window.chessP2P.send('rematch-accept', { myNewColor: myColor });
                 startNewGame(gameMode, timeControl.baseMs, timeControl.incMs, myColor);
@@ -290,13 +300,15 @@
     /* ==========================================================================
        Game Flow & Board Logic
        ========================================================================== */
-    function startNewGame(mode, baseMs, incMs, playerColor) {
+    function startNewGame(mode, baseMs, incMs, playerColor = 'w', difficulty = 'medium') {
         chess = new Chess();
         selectedSquare = null;
         validMoves = [];
         isGameOver = false;
+        isAiThinking = false;
         gameMode = mode;
         myColor = playerColor;
+        aiDifficulty = difficulty;
         isFlipped = (myColor === 'b');
 
         timeControl = { baseMs, incMs };
@@ -317,10 +329,20 @@
             topClock.textContent = '∞';
             bottomClock.textContent = '∞';
         }
+
+        // If playing against AI and player is Black, AI makes first move as White
+        if (gameMode === 'ai' && myColor === 'b') {
+            triggerAiMove();
+        }
     }
 
     function updateGameBadges() {
-        if (gameMode === 'hotseat') {
+        if (gameMode === 'ai') {
+            const diffNames = { easy: '🟢 Лёгкий бот', medium: '🟡 Средний бот', hard: '🔴 Сложный бот' };
+            gameModeBadge.textContent = diffNames[aiDifficulty] || '🤖 Бот';
+            gameModeBadge.style.background = '#8b5cf6';
+            shareContainer.style.display = 'none';
+        } else if (gameMode === 'hotseat') {
             gameModeBadge.textContent = '👥 Hotseat';
             gameModeBadge.style.background = '#64748b';
             shareContainer.style.display = 'none';
@@ -334,7 +356,20 @@
     function updatePlayerBars() {
         const isWhiteAtBottom = !isFlipped;
 
-        if (gameMode === 'hotseat') {
+        if (gameMode === 'ai') {
+            const diffNames = { easy: 'Лёгкий', medium: 'Средний', hard: 'Сложный' };
+            if (myColor === 'w') {
+                bottomName.textContent = 'Вы (Белые)';
+                topName.textContent = `Бот [${diffNames[aiDifficulty]}] (Черные)`;
+                bottomAvatar.textContent = '♔';
+                topAvatar.textContent = '🤖';
+            } else {
+                bottomName.textContent = 'Вы (Черные)';
+                topName.textContent = `Бот [${diffNames[aiDifficulty]}] (Белые)`;
+                bottomAvatar.textContent = '♚';
+                topAvatar.textContent = '🤖';
+            }
+        } else if (gameMode === 'hotseat') {
             bottomName.textContent = isWhiteAtBottom ? 'Белые' : 'Черные';
             topName.textContent = isWhiteAtBottom ? 'Черные' : 'Белые';
             bottomAvatar.textContent = isWhiteAtBottom ? '♔' : '♚';
@@ -374,22 +409,19 @@
                 sqEl.className = `square ${isLight ? 'light' : 'dark'}`;
                 sqEl.dataset.square = sqName;
 
-                // Last move highlight
                 if (lastMove && (lastMove.from === sqName || lastMove.to === sqName)) {
                     sqEl.classList.add('last-move');
                 }
 
-                // Selected highlight
                 if (selectedSquare === sqName) {
                     sqEl.classList.add('selected');
                 }
 
-                // In Check highlight
                 if (inCheckKingSquare === sqName) {
                     sqEl.classList.add('in-check');
                 }
 
-                // Coordinates indicators on board edges
+                // Coordinates indicators
                 if ((!isFlipped && f === 0) || (isFlipped && f === 7)) {
                     const rankCoord = document.createElement('span');
                     rankCoord.className = 'coord coord-rank';
@@ -409,14 +441,14 @@
                     const pieceEl = document.createElement('div');
                     pieceEl.className = 'piece';
                     pieceEl.style.backgroundImage = `url('assets/pieces/${piece.color}${piece.type.toUpperCase()}.svg')`;
-                    pieceEl.draggable = isMyTurn() && (gameMode === 'hotseat' || piece.color === myColor);
+                    pieceEl.draggable = isMyTurn() && canControlPiece(piece.color);
                     pieceEl.dataset.square = sqName;
 
                     pieceEl.addEventListener('dragstart', handleDragStart);
                     sqEl.appendChild(pieceEl);
                 }
 
-                // Move hints (dots or capture rings)
+                // Move hints
                 const moveHint = validMoves.find(m => m.to === sqName);
                 if (moveHint) {
                     const hintEl = document.createElement('div');
@@ -428,7 +460,6 @@
                     sqEl.appendChild(hintEl);
                 }
 
-                // Square click & drag drop handlers
                 sqEl.addEventListener('click', () => handleSquareClick(sqName));
                 sqEl.addEventListener('dragover', (e) => e.preventDefault());
                 sqEl.addEventListener('drop', handleDrop);
@@ -438,8 +469,14 @@
         }
     }
 
+    function canControlPiece(pieceColor) {
+        if (gameMode === 'hotseat') return true;
+        if (gameMode === 'ai') return pieceColor === myColor && !isAiThinking;
+        return pieceColor === myColor;
+    }
+
     function isMyTurn() {
-        if (isGameOver) return false;
+        if (isGameOver || isAiThinking) return false;
         if (gameMode === 'hotseat') return true;
         return chess.turn() === myColor;
     }
@@ -459,12 +496,11 @@
     }
 
     /* ==========================================================================
-       User Interactions (Clicks & Drag/Drop)
+       User Interactions
        ========================================================================== */
     function handleSquareClick(square) {
-        if (isGameOver) return;
+        if (isGameOver || isAiThinking) return;
 
-        // If player clicked on a valid destination square
         if (selectedSquare) {
             const move = validMoves.find(m => m.to === square);
             if (move) {
@@ -473,9 +509,8 @@
             }
         }
 
-        // Otherwise selecting or changing piece
         const piece = chess.get(square);
-        if (piece && isMyTurn() && (gameMode === 'hotseat' || piece.color === myColor) && piece.color === chess.turn()) {
+        if (piece && isMyTurn() && canControlPiece(piece.color) && piece.color === chess.turn()) {
             selectedSquare = square;
             validMoves = chess.moves({ square, verbose: true });
         } else {
@@ -492,11 +527,7 @@
         }
         const square = e.target.dataset.square;
         const piece = chess.get(square);
-        if (!piece || piece.color !== chess.turn()) {
-            e.preventDefault();
-            return;
-        }
-        if (gameMode !== 'hotseat' && piece.color !== myColor) {
+        if (!piece || piece.color !== chess.turn() || !canControlPiece(piece.color)) {
             e.preventDefault();
             return;
         }
@@ -519,13 +550,12 @@
     }
 
     /* ==========================================================================
-       Move Execution & Promotion
+       Move Execution & AI Bot
        ========================================================================== */
     function attemptMove(from, to) {
         const piece = chess.get(from);
         if (!piece) return;
 
-        // Check if pawn reaches back rank
         const isPromotion = piece.type === 'p' && ((piece.color === 'w' && to[1] === '8') || (piece.color === 'b' && to[1] === '1'));
 
         if (isPromotion) {
@@ -582,7 +612,6 @@
 
         handleMoveSound(move);
 
-        // Send move via P2P
         if (gameMode.startsWith('p2p')) {
             window.chessP2P.send('move', {
                 from: move.from,
@@ -593,6 +622,45 @@
         }
 
         onMoveComplete(move);
+
+        // Check if AI turn next
+        if (gameMode === 'ai' && !isGameOver && chess.turn() !== myColor) {
+            triggerAiMove();
+        }
+    }
+
+    function triggerAiMove() {
+        isAiThinking = true;
+        statusBanner.className = 'status-banner';
+        statusText.textContent = 'Бот рассчитывает ход... 🤔';
+
+        // Add human-like thinking delay (350 - 700ms)
+        const delay = Math.floor(Math.random() * 350) + 350;
+        setTimeout(() => {
+            if (isGameOver) {
+                isAiThinking = false;
+                return;
+            }
+
+            const bestMove = window.chessAI.getBestMove(chess, aiDifficulty);
+            isAiThinking = false;
+
+            if (bestMove) {
+                const move = chess.move({
+                    from: bestMove.from,
+                    to: bestMove.to,
+                    promotion: bestMove.promotion || 'q'
+                });
+
+                if (move) {
+                    if (timeControl.baseMs > 0) {
+                        clocks[move.color] += timeControl.incMs;
+                    }
+                    handleMoveSound(move);
+                    onMoveComplete(move);
+                }
+            }
+        }, delay);
     }
 
     function handleMoveSound(move) {
@@ -692,8 +760,8 @@
         }
 
         const startPieces = { p: 8, n: 2, b: 2, r: 2, q: 1 };
-        const capturedByWhite = []; // Black pieces captured
-        const capturedByBlack = []; // White pieces captured
+        const capturedByWhite = [];
+        const capturedByBlack = [];
 
         let whiteMaterial = 0;
         let blackMaterial = 0;
@@ -763,7 +831,6 @@
             const delta = now - lastClockTick;
             lastClockTick = now;
 
-            // First move hasn't been played yet — clock starts after White's first move
             if (chess.history().length === 0) return;
 
             const turn = chess.turn();
@@ -830,6 +897,9 @@
             window.chessP2P.send('resign');
             const winner = myColor === 'w' ? 'Черные' : 'Белые';
             endGame(`Вы сдались. Победили ${winner}!`, 'Сдача');
+        } else if (gameMode === 'ai') {
+            const winner = myColor === 'w' ? 'Черные (Бот)' : 'Белые (Бот)';
+            endGame(`Вы сдались. Победил ${winner}!`, 'Сдача');
         } else {
             const turn = chess.turn();
             const winner = turn === 'w' ? 'Черные' : 'Белые';
@@ -842,6 +912,15 @@
         if (gameMode.startsWith('p2p')) {
             window.chessP2P.send('offer-draw');
             showToast('Предложение ничьей отправлено сопернику...');
+        } else if (gameMode === 'ai') {
+            // AI evaluates if it's fair or losing
+            const evalScore = window.chessAI.evaluateBoard(chess);
+            const isAiLosing = (myColor === 'w' && evalScore > 300) || (myColor === 'b' && evalScore < -300);
+            if (isAiLosing || Math.abs(evalScore) < 150) {
+                endGame('Бот принял ваше предложение ничьей.', 'Ничья');
+            } else {
+                showToast('Бот отклонил предложение ничьей (позиция в его пользу).');
+            }
         } else {
             if (confirm('Оба игрока согласны на ничью?')) {
                 endGame('Партия завершилась вничью по соглашению сторон.', 'Ничья');
@@ -884,6 +963,5 @@
         return five;
     }
 
-    // Start on DOM ready
     window.addEventListener('DOMContentLoaded', init);
 })();
