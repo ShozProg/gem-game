@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gem Chess — Шахматы онлайн (P2P)</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💎</text></svg>">
+</head>
+<body>
+
+    <!-- Header -->
+    <header class="app-header">
+        <div class="logo-area">
+            <span class="gem-icon">💎</span>
+            <h1>Gem Chess</h1>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-secondary" id="btn-toggle-sound" title="Включить/выключить звук">🔊 Звук</button>
+            <button class="btn btn-secondary" id="btn-flip-board" title="Развернуть доску">🔄 Развернуть</button>
+            <button class="btn btn-primary" id="btn-new-game">🎮 Меню игры</button>
+        </div>
+    </header>
+
+    <!-- Main Layout -->
+    <main class="main-layout">
+        
+        <!-- Chessboard Area -->
+        <section class="board-column">
+            
+            <!-- Top Player Bar -->
+            <div class="player-bar" id="top-player-bar">
+                <div class="player-info">
+                    <div class="player-avatar" id="top-player-avatar">♚</div>
+                    <div class="player-details">
+                        <span class="player-name" id="top-player-name">Соперник (Черные)</span>
+                        <div class="captured-pieces" id="top-captured-pieces">
+                            <!-- Captured pieces injected here -->
+                        </div>
+                    </div>
+                </div>
+                <div class="player-clock" id="top-player-clock">10:00</div>
+            </div>
+
+            <!-- Chessboard -->
+            <div class="board-wrapper">
+                <div class="chessboard" id="chessboard">
+                    <!-- 64 squares generated via JS -->
+                </div>
+            </div>
+
+            <!-- Bottom Player Bar -->
+            <div class="player-bar active" id="bottom-player-bar">
+                <div class="player-info">
+                    <div class="player-avatar" id="bottom-player-avatar">♔</div>
+                    <div class="player-details">
+                        <span class="player-name" id="bottom-player-name">Вы (Белые)</span>
+                        <div class="captured-pieces" id="bottom-captured-pieces">
+                            <!-- Captured pieces injected here -->
+                        </div>
+                    </div>
+                </div>
+                <div class="player-clock" id="bottom-player-clock">10:00</div>
+            </div>
+
+        </section>
+
+        <!-- Sidebar / Game Controls -->
+        <aside class="sidebar-column">
+            
+            <!-- Status Card -->
+            <div class="card">
+                <div class="card-title">
+                    <span>Статус партии</span>
+                    <span id="game-mode-badge" style="font-size: 0.75rem; background: #3b82f6; padding: 2px 8px; border-radius: 12px;">Локально</span>
+                </div>
+                <div class="status-banner" id="status-banner">
+                    <span id="status-icon">⚪</span>
+                    <span id="status-text">Ход белых</span>
+                </div>
+            </div>
+
+            <!-- Move History -->
+            <div class="card">
+                <div class="card-title">
+                    <span>История ходов</span>
+                    <span id="moves-count" style="font-size: 0.8rem; color: var(--text-secondary);">0 ходов</span>
+                </div>
+                <div class="history-container" id="history-container">
+                    <table class="history-table">
+                        <tbody id="history-tbody">
+                            <!-- Moves rows -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="card">
+                <div class="game-controls">
+                    <button class="btn btn-secondary" id="btn-offer-draw">🤝 Ничья</button>
+                    <button class="btn btn-danger" id="btn-resign">🏳️ Сдаться</button>
+                </div>
+                <div style="margin-top: 12px; display: none;" id="p2p-share-container">
+                    <div class="share-box">
+                        <input type="text" class="share-input" id="share-link-input" readonly>
+                        <button class="btn btn-primary" id="btn-copy-link">Копировать</button>
+                    </div>
+                </div>
+            </div>
+
+        </aside>
+
+    </main>
+
+    <!-- Modal: New Game / Lobby -->
+    <div class="modal-overlay" id="modal-lobby">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2>Настройки партии</h2>
+                <button class="modal-close" id="modal-lobby-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Режим игры</label>
+                    <select class="select" id="select-game-mode">
+                        <option value="hotseat">👥 Игра вдвоем на одном экране (Hotseat)</option>
+                        <option value="p2p-create">🌐 Создать онлайн-игру (P2P по ссылке)</option>
+                        <option value="p2p-join">🔗 Присоединиться к онлайн-игре</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="group-time-control">
+                    <label>Контроль времени (на партию)</label>
+                    <select class="select" id="select-time-control">
+                        <option value="600,0" selected>10 минут (Рапид)</option>
+                        <option value="300,0">5 минут (Блиц)</option>
+                        <option value="180,2">3 мин + 2 сек (Блиц с добавлением)</option>
+                        <option value="60,1">1 мин + 1 сек (Пуля)</option>
+                        <option value="900,10">15 мин + 10 сек (Классика)</option>
+                        <option value="0,0">Без ограничения по времени</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="group-color-choice">
+                    <label>Выбор цвета (для создателя игры)</label>
+                    <select class="select" id="select-color-choice">
+                        <option value="random">🎲 Случайно (Белые или Черные)</option>
+                        <option value="w">⚪ Белые</option>
+                        <option value="b">⚫ Черные</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="group-room-id" style="display: none;">
+                    <label>Код комнаты или ссылка соперника</label>
+                    <input type="text" class="input-text" id="input-room-id" placeholder="Например: gem-a3x9k2">
+                </div>
+
+                <button class="btn btn-primary" id="btn-start-game-confirm" style="width: 100%; margin-top: 8px;">
+                    Начать партию
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Waiting for Opponent (P2P Host) -->
+    <div class="modal-overlay" id="modal-waiting">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2>Ожидание соперника</h2>
+                <button class="modal-close" id="modal-waiting-close">&times;</button>
+            </div>
+            <div class="modal-body" style="text-align: center;">
+                <p style="color: var(--text-secondary); margin-bottom: 8px;">
+                    Отправьте эту ссылку другу, чтобы он подключился к партии:
+                </p>
+                <div class="share-box">
+                    <input type="text" class="share-input" id="modal-share-link" readonly>
+                    <button class="btn btn-primary" id="btn-modal-copy-link">Копировать</button>
+                </div>
+                <div style="margin-top: 18px; color: var(--accent-blue); font-weight: 500;">
+                    ⏳ Ожидание подключения второго игрока...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Pawn Promotion -->
+    <div class="modal-overlay" id="modal-promotion">
+        <div class="modal-card" style="text-align: center;">
+            <h2>Превращение пешки</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 12px;">Выберите фигуру:</p>
+            <div class="promotion-choices" id="promotion-choices">
+                <!-- Buttons injected by JS with correct piece colors -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Game Over -->
+    <div class="modal-overlay" id="modal-gameover">
+        <div class="modal-card" style="text-align: center;">
+            <div class="modal-header">
+                <h2 id="gameover-title" style="width: 100%; text-align: center;">Партия завершена</h2>
+            </div>
+            <div class="modal-body">
+                <p id="gameover-reason" style="font-size: 1.1rem; font-weight: 600;"></p>
+                <p id="gameover-detail" style="color: var(--text-secondary);"></p>
+                <div style="display: flex; gap: 10px; margin-top: 12px;">
+                    <button class="btn btn-primary" id="btn-gameover-rematch" style="flex: 1;">Новая партия</button>
+                    <button class="btn btn-secondary" id="btn-gameover-close" style="flex: 1;">Закрыть</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- Scripts -->
+    <script src="js/chess.min.js"></script>
+    <script src="js/peerjs.min.js"></script>
+    <script src="js/audio.js"></script>
+    <script src="js/p2p.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
