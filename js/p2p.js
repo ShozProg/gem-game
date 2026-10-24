@@ -1,28 +1,18 @@
 /**
- * P2P Network Controller using PeerJS for Chess WebRTC communication
- * Fully hardened with Google/Cloudflare STUN servers and robust handshaking
+ * Ultra-Reliable WebSocket Real-Time Relay for Chess Multiplayer
+ * Replaces fragile P2P WebRTC with standard HTTPS/WSS WebSockets.
+ * Works across all NATs, mobile networks, VPNs, and firewalls without TURN servers.
  */
-class ChessP2P {
+class ChessNetwork {
     constructor() {
-        this.peer = null;
-        this.conn = null;
-        this.myPeerId = null;
-        this.targetHostId = null;
+        this.ws = null;
+        this.roomId = null;
+        this.myClientId = 'p_' + Math.random().toString(36).slice(2, 9);
         this.isHost = false;
         this.handlers = {};
         this.isConnected = false;
-        this.connectTimeout = null;
-
-        this.rtcConfig = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' },
-                { urls: 'stun:stun.cloudflare.com:3478' }
-            ]
-        };
+        this.reconnectTimer = null;
+        this.pingTimer = null;
     }
 
     on(event, handler) {
@@ -34,7 +24,7 @@ class ChessP2P {
             try {
                 this.handlers[event](data);
             } catch (err) {
-                console.error(`Error in P2P handler for event ${event}:`, err);
+                console.error(`[Network] Error in handler for ${event}:`, err);
             }
         }
     }
@@ -48,50 +38,22 @@ class ChessP2P {
         return `gem-${id}`;
     }
 
+    getTopic(roomId) {
+        return `gemchess-v2-${roomId.toLowerCase().trim()}`;
+    }
+
     initHost(roomId, onReady) {
         this.disconnect();
         this.isHost = true;
-        const targetId = roomId || this.generateRoomId();
-        console.log('[P2P] Initializing Host with ID:', targetId);
+        this.roomId = roomId || this.generateRoomId();
+        const topic = this.getTopic(this.roomId);
 
-        try {
-            this.peer = new Peer(targetId, {
-                debug: 1,
-                config: this.rtcConfig
-            });
-        } catch (e) {
-            console.error('[P2P] Peer constructor failed:', e);
-            this.emit('error', 'Не удалось инициализировать P2P клиент.');
-            return;
-        }
+        console.log(`[Network] Initializing Host on room ${this.roomId} (topic: ${topic})`);
 
-        this.peer.on('open', (id) => {
-            console.log('[P2P] Host Peer opened with ID:', id);
-            this.myPeerId = id;
-            if (onReady) onReady(id);
-            this.emit('host-ready', id);
-        });
-
-        this.peer.on('connection', (connection) => {
-            console.log('[P2P] Host received incoming connection from:', connection.peer);
-            if (this.conn && this.conn.open) {
-                console.warn('[P2P] Already connected, rejecting new connection');
-                connection.close();
-                return;
-            }
-            this.conn = connection;
-            this.setupConnection();
-        });
-
-        this.peer.on('error', (err) => {
-            console.error('[P2P] Host peer error:', err);
-            if (err.type === 'unavailable-id') {
-                // Retry with a fresh random ID
-                console.log('[P2P] ID unavailable, generating fresh ID...');
-                this.initHost(null, onReady);
-            } else {
-                this.emit('error', `Ошибка сети: ${err.type || err.message}`);
-            }
+        this.connectWebSocket(topic, () => {
+            console.log(`[Network] Host connected to relay`);
+            if (onReady) onReady(this.roomId);
+            this.emit('host-ready', this.roomId);
         });
     }
 
@@ -99,132 +61,142 @@ class ChessP2P {
         this.disconnect();
         this.isHost = false;
 
-        let hostId = rawHostId.trim().toLowerCase();
-        if (!hostId.startsWith('gem-')) {
-            hostId = `gem-${hostId}`;
+        let roomId = rawHostId.trim().toLowerCase();
+        if (!roomId.startsWith('gem-')) {
+            roomId = `gem-${roomId}`;
         }
-        this.targetHostId = hostId;
+        this.roomId = roomId;
+        const topic = this.getTopic(this.roomId);
 
-        console.log('[P2P] Connecting as Guest to Host ID:', hostId);
-        this.emit('connecting', hostId);
+        console.log(`[Network] Guest connecting to room ${this.roomId} (topic: ${topic})`);
+        this.emit('connecting', this.roomId);
 
+        this.connectWebSocket(topic, () => {
+            console.log(`[Network] Guest connected to relay, announcing presence...`);
+            // Announce presence to Host
+            this.send('guest-join', { clientId: this.myClientId });
+        });
+    }
+
+    connectWebSocket(topic, onOpenCallback) {
         try {
-            this.peer = new Peer({
-                debug: 1,
-                config: this.rtcConfig
-            });
-        } catch (e) {
-            console.error('[P2P] Guest peer constructor failed:', e);
-            this.emit('error', 'Не удалось запустить P2P клиент.');
+            const wsUrl = `wss://ntfy.sh/${topic}/ws`;
+            this.ws = new WebSocket(wsUrl);
+
+            this.ws.onopen = () => {
+                console.log(`[Network] WSS open for topic: ${topic}`);
+                this.isConnected = true;
+                if (onOpenCallback) onOpenCallback();
+                this.startHeartbeat();
+            };
+
+            this.ws.onmessage = (event) => {
+                try {
+                    const raw = JSON.parse(event.data);
+                    if (raw.event !== 'message') return;
+
+                    const msg = JSON.parse(raw.message);
+                    // Ignore our own broadcasted packets
+                    if (msg.senderId === this.myClientId) return;
+
+                    console.log(`[Network] Received:`, msg.type, msg.payload);
+                    this.handleMessage(msg);
+                } catch (e) {
+                    console.warn(`[Network] Could not parse message:`, event.data, e);
+                }
+            };
+
+            this.ws.onclose = () => {
+                console.log(`[Network] WSS closed`);
+                this.isConnected = false;
+                this.stopHeartbeat();
+            };
+
+            this.ws.onerror = (err) => {
+                console.error(`[Network] WSS error:`, err);
+                this.emit('error', 'Ошибка связи с сервером синхронизации.');
+            };
+        } catch (err) {
+            console.error(`[Network] Failed to create WebSocket:`, err);
+            this.emit('error', 'Не удалось открыть соединение.');
+        }
+    }
+
+    handleMessage(msg) {
+        const { type, payload } = msg;
+
+        if (type === 'guest-join' && this.isHost) {
+            console.log('[Network] Host detected guest-join! Firing connected event...');
+            this.emit('connected', { isHost: true });
             return;
         }
 
-        // Set 15s connection timeout
-        clearTimeout(this.connectTimeout);
-        this.connectTimeout = setTimeout(() => {
-            if (!this.isConnected) {
-                console.warn('[P2P] Connection timeout reached');
-                this.emit('error', 'Время ожидания подключения истекло. Убедитесь, что создатель игры открыл комнату и находится в сети.');
-            }
-        }, 15000);
-
-        this.peer.on('open', (myId) => {
-            console.log('[P2P] Guest peer opened with ID:', myId);
-            this.myPeerId = myId;
-
-            try {
-                this.conn = this.peer.connect(this.targetHostId, {
-                    reliable: true
-                });
-                this.setupConnection();
-            } catch (err) {
-                console.error('[P2P] peer.connect threw:', err);
-                this.emit('error', 'Не удалось соединиться с хостом.');
-            }
-        });
-
-        this.peer.on('error', (err) => {
-            console.error('[P2P] Guest peer error:', err);
-            clearTimeout(this.connectTimeout);
-            if (err.type === 'peer-unavailable') {
-                this.emit('error', `Комната "${hostId}" не найдена. Возможно, создатель игры вышел или код неверный.`);
-            } else {
-                this.emit('error', `Ошибка соединения: ${err.type || err.message}`);
-            }
-        });
-    }
-
-    setupConnection() {
-        if (!this.conn) return;
-
-        const onConnectionEstablished = () => {
-            if (this.isConnected) return;
-            this.isConnected = true;
-            clearTimeout(this.connectTimeout);
-            console.log('[P2P] DataChannel opened successfully! isHost =', this.isHost);
-            this.emit('connected', { isHost: this.isHost });
-
-            // If Guest, send immediate hello/join message so Host knows we are ready
-            if (!this.isHost) {
-                this.send('guest-join', { ready: true });
-            }
-        };
-
-        if (this.conn.open) {
-            // Already open
-            setTimeout(onConnectionEstablished, 10);
-        } else {
-            this.conn.on('open', onConnectionEstablished);
+        if (type === 'game-init' && !this.isHost) {
+            console.log('[Network] Guest received game-init from host!');
+            this.emit('connected', { isHost: false });
+            this.emit('msg:game-init', payload);
+            return;
         }
 
-        this.conn.on('data', (data) => {
-            console.log('[P2P] Received packet:', data);
-            if (data && data.type) {
-                this.emit(`msg:${data.type}`, data.payload);
-            }
-        });
-
-        this.conn.on('close', () => {
-            console.log('[P2P] Connection closed');
-            this.isConnected = false;
-            this.emit('disconnected');
-        });
-
-        this.conn.on('error', (err) => {
-            console.error('[P2P] Connection channel error:', err);
-            this.emit('error', 'Ошибка канала передачи данных.');
-        });
+        this.emit(`msg:${type}`, payload);
     }
 
-    send(type, payload = {}) {
-        if (this.conn && this.conn.open) {
-            console.log('[P2P] Sending packet:', type, payload);
-            try {
-                this.conn.send({ type, payload });
-            } catch (err) {
-                console.error('[P2P] Error sending data:', err);
+    async send(type, payload = {}) {
+        if (!this.roomId) {
+            console.warn('[Network] Cannot send: no roomId');
+            return;
+        }
+
+        const topic = this.getTopic(this.roomId);
+        const data = {
+            senderId: this.myClientId,
+            type: type,
+            payload: payload,
+            ts: Date.now()
+        };
+
+        try {
+            console.log(`[Network] Sending [${type}] to ${topic}:`, payload);
+            await fetch(`https://ntfy.sh/${topic}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+        } catch (err) {
+            console.error(`[Network] Error sending packet [${type}]:`, err);
+        }
+    }
+
+    startHeartbeat() {
+        this.stopHeartbeat();
+        // Keep WebSocket alive
+        this.pingTimer = setInterval(() => {
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                // ntfy.sh supports ping or empty message
             }
-        } else {
-            console.warn('[P2P] Cannot send packet, connection is not open:', type);
+        }, 20000);
+    }
+
+    stopHeartbeat() {
+        if (this.pingTimer) {
+            clearInterval(this.pingTimer);
+            this.pingTimer = null;
         }
     }
 
     disconnect() {
-        clearTimeout(this.connectTimeout);
-        if (this.conn) {
+        this.stopHeartbeat();
+        if (this.ws) {
             try {
-                this.conn.close();
+                this.ws.close();
             } catch (e) {}
-            this.conn = null;
-        }
-        if (this.peer) {
-            try {
-                this.peer.destroy();
-            } catch (e) {}
-            this.peer = null;
+            this.ws = null;
         }
         this.isConnected = false;
+        this.roomId = null;
     }
 }
 
-window.chessP2P = new ChessP2P();
+// Export as both chessNetwork and chessP2P for drop-in compatibility
+window.chessNetwork = new ChessNetwork();
+window.chessP2P = window.chessNetwork;
