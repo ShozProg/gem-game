@@ -9,8 +9,9 @@
     --accent-green: #22c55e;
     --accent-red: #ef4444;
     --accent-gold: #eab308;
+    --accent-purple: #8b5cf6;
 
-    /* Chessboard Colors (Modern Wood/Slate) */
+    /* Default Board Colors (Classic Wood) */
     --board-light: #ece0d1;
     --board-dark: #967259;
     --square-selected: rgba(255, 235, 59, 0.65);
@@ -20,6 +21,24 @@
     --square-hint-capture: rgba(239, 68, 68, 0.5);
 
     --border-radius: 12px;
+}
+
+/* Board Themes */
+.theme-wood {
+    --board-light: #ece0d1;
+    --board-dark: #967259;
+}
+.theme-emerald {
+    --board-light: #ffffdd;
+    --board-dark: #86a666;
+}
+.theme-slate {
+    --board-light: #dee3e6;
+    --board-dark: #8ca2ad;
+}
+.theme-gem {
+    --board-light: #dbeafe;
+    --board-dark: #3b82f6;
 }
 
 * {
@@ -67,7 +86,8 @@ body {
 .header-actions {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 /* Main Container */
@@ -197,6 +217,7 @@ body {
     overflow: hidden;
     user-select: none;
     border: 4px solid #382923;
+    transition: border-color 0.3s ease;
 }
 
 .chessboard {
@@ -349,9 +370,60 @@ body {
     color: #86efac;
 }
 
+/* Tabs: Moves History vs Chat */
+.sidebar-tabs {
+    display: flex;
+    border-bottom: 1px solid #3e4451;
+    margin-bottom: 12px;
+}
+
+.tab-btn {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 10px 14px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.15s ease;
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
+}
+
+.tab-btn.active {
+    color: var(--accent-blue);
+    border-bottom-color: var(--accent-blue);
+}
+
+.tab-badge {
+    background: var(--accent-red);
+    color: white;
+    font-size: 0.7rem;
+    padding: 1px 6px;
+    border-radius: 10px;
+    display: none;
+}
+
+.tab-pane {
+    display: none;
+}
+
+.tab-pane.active {
+    display: flex;
+    flex-direction: column;
+}
+
 /* Move History */
 .history-container {
-    height: 180px;
+    height: 220px;
     overflow-y: auto;
     background-color: #16171a;
     border-radius: 8px;
@@ -385,8 +457,117 @@ body {
     background-color: #2b2e36;
 }
 
-.history-move.active {
+/* Chat Pane */
+.chat-container {
+    height: 180px;
+    overflow-y: auto;
+    background-color: #16171a;
+    border-radius: 8px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.chat-message {
+    padding: 6px 12px;
+    border-radius: 12px;
+    font-size: 0.9rem;
+    max-width: 85%;
+    word-break: break-word;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.chat-message.mine {
+    align-self: flex-end;
     background-color: #2563eb;
+    color: white;
+    border-bottom-right-radius: 2px;
+}
+
+.chat-message.opponent {
+    align-self: flex-start;
+    background-color: #2b2e36;
+    color: var(--text-primary);
+    border-bottom-left-radius: 2px;
+}
+
+.chat-author {
+    font-size: 0.7rem;
+    opacity: 0.8;
+    font-weight: 600;
+}
+
+/* Quick Emojis */
+.quick-emojis {
+    display: flex;
+    gap: 6px;
+    padding: 8px 0;
+    overflow-x: auto;
+}
+
+.emoji-btn {
+    background: #2b2e36;
+    border: 1px solid #3e4451;
+    border-radius: 6px;
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    transition: transform 0.1s ease, background 0.1s ease;
+}
+
+.emoji-btn:hover {
+    transform: scale(1.15);
+    background: #3e4451;
+}
+
+/* Quick Phrases */
+.quick-phrases {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-bottom: 8px;
+}
+
+.phrase-chip {
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #94a3b8;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    padding: 3px 10px;
+    cursor: pointer;
+    transition: all 0.1s ease;
+}
+
+.phrase-chip:hover {
+    background: #3b82f6;
+    color: white;
+    border-color: #60a5fa;
+}
+
+/* Chat Input Bar */
+.chat-input-bar {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.chat-input {
+    flex: 1;
+    background: #18191c;
+    border: 1px solid #3e4451;
+    color: var(--text-primary);
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    outline: none;
+}
+
+.chat-input:focus {
+    border-color: var(--accent-blue);
 }
 
 /* Game Controls */
@@ -402,7 +583,7 @@ body {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 10px 16px;
+    padding: 9px 14px;
     border-radius: 8px;
     font-weight: 600;
     font-size: 0.9rem;
@@ -445,19 +626,6 @@ body {
     color: white;
 }
 
-.btn-icon {
-    padding: 8px 12px;
-    border-radius: 8px;
-    background: transparent;
-    border: 1px solid #3b404d;
-    color: var(--text-primary);
-    cursor: pointer;
-}
-
-.btn-icon:hover {
-    background: var(--bg-card-subtle);
-}
-
 /* Modals */
 .modal-overlay {
     position: fixed;
@@ -486,7 +654,7 @@ body {
     border: 1px solid #3e4451;
     border-radius: 16px;
     padding: 24px;
-    max-width: 440px;
+    max-width: 480px;
     width: 90%;
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
 }
@@ -515,6 +683,83 @@ body {
     display: flex;
     flex-direction: column;
     gap: 16px;
+}
+
+/* Theme Previews Grid */
+.theme-options-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.theme-card {
+    background: #18191c;
+    border: 2px solid #3e4451;
+    border-radius: 10px;
+    padding: 12px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.15s ease;
+}
+
+.theme-card:hover {
+    border-color: #60a5fa;
+    transform: translateY(-2px);
+}
+
+.theme-card.active {
+    border-color: var(--accent-blue);
+    background: #1e293b;
+}
+
+.theme-preview-pieces {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.theme-preview-pieces img {
+    width: 34px;
+    height: 34px;
+}
+
+.theme-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+/* Board Swatches */
+.board-swatches-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+}
+
+.board-swatch {
+    height: 48px;
+    border-radius: 8px;
+    border: 2px solid #3e4451;
+    cursor: pointer;
+    display: flex;
+    overflow: hidden;
+    transition: all 0.15s ease;
+}
+
+.board-swatch:hover {
+    transform: scale(1.05);
+}
+
+.board-swatch.active {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+}
+
+.swatch-half {
+    flex: 1;
+    height: 100%;
 }
 
 /* Form controls */

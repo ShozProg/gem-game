@@ -1,6 +1,7 @@
 /**
  * Main Application Controller for Gem Chess
- * Supports AI Bot (Easy/Medium/Hard), Hotseat, and Online P2P (PeerJS)
+ * Supports AI Bot, Hotseat, Online P2P/WSS, Live Chat with Emojis & Quick Phrases,
+ * and Piece & Board Customization Themes.
  */
 (() => {
     // Game State
@@ -15,8 +16,16 @@
     let isGameOver = false;
     let isAiThinking = false;
 
+    // Customization Settings
+    let currentPieceTheme = localStorage.getItem('gem_piece_theme') || 'cburnett';
+    let currentBoardTheme = localStorage.getItem('gem_board_theme') || 'wood';
+
+    // Chat State
+    let unreadChatCount = 0;
+    let activeTab = 'moves'; // 'moves' | 'chat'
+
     // Time Control State
-    let timeControl = { baseMs: 600000, incMs: 0 }; // default 10m + 0s
+    let timeControl = { baseMs: 600000, incMs: 0 };
     let clocks = { w: 600000, b: 600000 };
     let clockTimer = null;
     let lastClockTick = null;
@@ -44,11 +53,22 @@
     const topAvatar = document.getElementById('top-player-avatar');
     const bottomAvatar = document.getElementById('bottom-player-avatar');
 
+    // Tabs & Chat
+    const tabMovesBtn = document.getElementById('tab-moves-btn');
+    const tabChatBtn = document.getElementById('tab-chat-btn');
+    const paneMoves = document.getElementById('pane-moves');
+    const paneChat = document.getElementById('pane-chat');
+    const chatContainer = document.getElementById('chat-container');
+    const chatInput = document.getElementById('chat-text-input');
+    const chatSendBtn = document.getElementById('btn-chat-send');
+    const chatBadge = document.getElementById('chat-unread-badge');
+
     // Modals
     const modalLobby = document.getElementById('modal-lobby');
     const modalWaiting = document.getElementById('modal-waiting');
     const modalPromotion = document.getElementById('modal-promotion');
     const modalGameOver = document.getElementById('modal-gameover');
+    const modalTheme = document.getElementById('modal-theme');
     const promoChoicesEl = document.getElementById('promotion-choices');
 
     const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
@@ -65,50 +85,80 @@
             return;
         }
 
+        applyThemes();
         bindEvents();
         setupP2PListeners();
 
-        // Check if user opened page via an invite link: ?game=XYZ or ?room=XYZ
+        // Check if user came via a shared URL
         const urlParams = new URLSearchParams(window.location.search);
         const joinRoom = urlParams.get('game') || urlParams.get('room');
 
         if (joinRoom) {
-            console.log('[App] Auto-joining room from URL:', joinRoom);
             prepareP2PJoin(joinRoom);
         } else {
-            // Default: offline game with AI
             startNewGame('ai', 600000, 0, 'w', 'medium');
         }
     }
 
+    function applyThemes() {
+        document.body.className = `theme-${currentBoardTheme}`;
+
+        // Sync theme modal active states
+        document.querySelectorAll('#piece-theme-options .theme-card').forEach(card => {
+            card.classList.toggle('active', card.dataset.pieceTheme === currentPieceTheme);
+        });
+        document.querySelectorAll('#board-theme-swatches .board-swatch').forEach(swatch => {
+            swatch.classList.toggle('active', swatch.dataset.boardTheme === currentBoardTheme);
+        });
+    }
+
+    function getPieceUrl(color, type) {
+        return `assets/pieces/${currentPieceTheme}/${color}${type.toUpperCase()}.svg`;
+    }
+
     function bindEvents() {
-        document.getElementById('btn-new-game').addEventListener('click', () => {
-            modalLobby.classList.add('active');
+        // Navigation / Modals
+        document.getElementById('btn-new-game').addEventListener('click', () => modalLobby.classList.add('active'));
+        document.getElementById('modal-lobby-close').addEventListener('click', () => modalLobby.classList.remove('active'));
+        document.getElementById('modal-waiting-close').addEventListener('click', () => modalWaiting.classList.remove('active'));
+
+        document.getElementById('btn-theme-modal').addEventListener('click', () => modalTheme.classList.add('active'));
+        document.getElementById('modal-theme-close').addEventListener('click', () => modalTheme.classList.remove('active'));
+
+        // Piece Theme Selection
+        document.querySelectorAll('#piece-theme-options .theme-card').forEach(card => {
+            card.addEventListener('click', () => {
+                currentPieceTheme = card.dataset.pieceTheme;
+                localStorage.setItem('gem_piece_theme', currentPieceTheme);
+                applyThemes();
+                renderBoard();
+                renderCaptured();
+                showToast(`Стиль фигур изменён на "${card.querySelector('.theme-name').textContent}"`);
+            });
         });
 
-        document.getElementById('modal-lobby-close').addEventListener('click', () => {
-            modalLobby.classList.remove('active');
+        // Board Color Selection
+        document.querySelectorAll('#board-theme-swatches .board-swatch').forEach(swatch => {
+            swatch.addEventListener('click', () => {
+                currentBoardTheme = swatch.dataset.boardTheme;
+                localStorage.setItem('gem_board_theme', currentBoardTheme);
+                applyThemes();
+                showToast(`Цвет доски обновлен`);
+            });
         });
 
-        document.getElementById('modal-waiting-close').addEventListener('click', () => {
-            modalWaiting.classList.remove('active');
-        });
-
+        // Lobby Mode Switcher
         document.getElementById('select-game-mode').addEventListener('change', (e) => {
             const val = e.target.value;
-            const groupTime = document.getElementById('group-time-control');
-            const groupColor = document.getElementById('group-color-choice');
-            const groupRoom = document.getElementById('group-room-id');
-            const groupAi = document.getElementById('group-ai-difficulty');
-
-            groupAi.style.display = (val === 'ai') ? 'flex' : 'none';
-            groupRoom.style.display = (val === 'p2p-join') ? 'flex' : 'none';
-            groupTime.style.display = (val === 'p2p-join') ? 'none' : 'flex';
-            groupColor.style.display = (val === 'p2p-join') ? 'none' : 'flex';
+            document.getElementById('group-ai-difficulty').style.display = (val === 'ai') ? 'flex' : 'none';
+            document.getElementById('group-room-id').style.display = (val === 'p2p-join') ? 'flex' : 'none';
+            document.getElementById('group-time-control').style.display = (val === 'p2p-join') ? 'none' : 'flex';
+            document.getElementById('group-color-choice').style.display = (val === 'p2p-join') ? 'none' : 'flex';
         });
 
         document.getElementById('btn-start-game-confirm').addEventListener('click', handleLobbySubmit);
 
+        // Header Buttons
         document.getElementById('btn-toggle-sound').addEventListener('click', (e) => {
             const enabled = window.chessAudio.toggle();
             e.target.textContent = enabled ? '🔊 Звук' : '🔇 Звук';
@@ -127,11 +177,12 @@
         document.getElementById('btn-resign').addEventListener('click', handleResign);
         document.getElementById('btn-offer-draw').addEventListener('click', handleOfferDraw);
 
+        // Rematch
         document.getElementById('btn-gameover-rematch').addEventListener('click', () => {
             modalGameOver.classList.remove('active');
             if (gameMode.startsWith('p2p')) {
                 window.chessP2P.send('rematch-offer');
-                showToast('Предложение реванша отправлено сопернику');
+                showToast('Предложение реванша отправлено');
             } else if (gameMode === 'ai') {
                 startNewGame('ai', timeControl.baseMs, timeControl.incMs, myColor, aiDifficulty);
             } else {
@@ -142,10 +193,126 @@
         document.getElementById('btn-gameover-close').addEventListener('click', () => {
             modalGameOver.classList.remove('active');
         });
+
+        // Tab Switching
+        tabMovesBtn.addEventListener('click', () => switchTab('moves'));
+        tabChatBtn.addEventListener('click', () => switchTab('chat'));
+
+        // Chat Send
+        chatSendBtn.addEventListener('click', submitChatMessage);
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') submitChatMessage();
+        });
+
+        // Quick Emojis
+        document.querySelectorAll('.emoji-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                sendChatMessage(btn.dataset.emoji);
+            });
+        });
+
+        // Quick Phrases
+        document.querySelectorAll('.phrase-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                sendChatMessage(chip.dataset.phrase);
+            });
+        });
+    }
+
+    function switchTab(tab) {
+        activeTab = tab;
+        tabMovesBtn.classList.toggle('active', tab === 'moves');
+        tabChatBtn.classList.toggle('active', tab === 'chat');
+        paneMoves.classList.toggle('active', tab === 'moves');
+        paneChat.classList.toggle('active', tab === 'chat');
+
+        if (tab === 'chat') {
+            unreadChatCount = 0;
+            chatBadge.style.display = 'none';
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
     }
 
     /* ==========================================================================
-       Lobby & P2P Networking
+       Chat Logic
+       ========================================================================== */
+    function submitChatMessage() {
+        const text = chatInput.value.trim();
+        if (!text) return;
+        chatInput.value = '';
+        sendChatMessage(text);
+    }
+
+    function sendChatMessage(text) {
+        addMessageToChat(text, 'mine', 'Вы');
+
+        if (gameMode.startsWith('p2p')) {
+            window.chessP2P.send('chat', {
+                text: text,
+                author: myColor === 'w' ? 'Белые' : 'Черные'
+            });
+        } else if (gameMode === 'ai') {
+            handleBotChatResponse(text);
+        }
+    }
+
+    function addMessageToChat(text, type, authorName) {
+        const msgEl = document.createElement('div');
+        msgEl.className = `chat-message ${type}`;
+
+        const authorEl = document.createElement('span');
+        authorEl.className = 'chat-author';
+        authorEl.textContent = authorName;
+
+        const bodyEl = document.createElement('span');
+        bodyEl.textContent = text;
+
+        msgEl.appendChild(authorEl);
+        msgEl.appendChild(bodyEl);
+        chatContainer.appendChild(msgEl);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+
+        if (type === 'opponent') {
+            window.chessAudio.playNotify();
+            if (activeTab !== 'chat') {
+                unreadChatCount++;
+                chatBadge.textContent = unreadChatCount;
+                chatBadge.style.display = 'inline-block';
+            }
+        }
+    }
+
+    function handleBotChatResponse(playerText) {
+        setTimeout(() => {
+            let reply = null;
+            const lower = playerText.toLowerCase();
+
+            if (lower.includes('привет')) {
+                reply = 'Привет! Желаю отличной партии. ♟️';
+            } else if (lower.includes('удачи') || lower.includes('🍀')) {
+                reply = 'Спасибо! Пусть победит сильнейший! 🎯';
+            } else if (lower.includes('хороший ход') || lower.includes('👏')) {
+                reply = 'Спасибо! Я старался рассчитать наилучший ответ. 🤖';
+            } else if (lower.includes('думаю') || lower.includes('🤔')) {
+                reply = 'Не торопись, время на твоей стороне! ⏳';
+            } else if (lower.includes('упс') || lower.includes('😅')) {
+                reply = 'В шахматах главное — не падать духом! 💪';
+            } else if (lower.includes('красиво') || lower.includes('🔥')) {
+                reply = 'Искусство тактики во всей красе! 🔥';
+            } else if (lower.includes('спасибо') || lower.includes('🤝')) {
+                reply = 'И тебе спасибо за интересную игру! 🤝';
+            } else if (playerText.length <= 4 && (playerText.includes('👍') || playerText.includes('💎') || playerText.includes('♟️'))) {
+                reply = '🤝 ' + playerText;
+            }
+
+            if (reply) {
+                addMessageToChat(reply, 'opponent', 'Бот');
+            }
+        }, 700);
+    }
+
+    /* ==========================================================================
+       Lobby & Networking
        ========================================================================== */
     function handleLobbySubmit() {
         const mode = document.getElementById('select-game-mode').value;
@@ -186,14 +353,12 @@
         window.chessP2P.disconnect();
         clearInterval(clockTimer);
 
-        // Switch mode to host immediately so bot NEVER triggers
         gameMode = 'p2p-host';
         myColor = colorChoice;
         timeControl = { baseMs, incMs };
         isAiThinking = false;
         isGameOver = false;
 
-        // Reset board for upcoming game
         chess = new Chess();
         selectedSquare = null;
         validMoves = [];
@@ -222,7 +387,6 @@
         window.chessP2P.disconnect();
         clearInterval(clockTimer);
 
-        // Parse ID from URL or text
         let roomId = rawRoomInput.trim();
         if (roomId.includes('game=')) {
             try {
@@ -243,7 +407,6 @@
             roomId = `gem-${roomId}`;
         }
 
-        // Set state to connecting P2P guest - bot MUST NOT run!
         gameMode = 'connecting';
         isAiThinking = false;
         isGameOver = false;
@@ -264,17 +427,12 @@
     }
 
     function setupP2PListeners() {
-        // When WebRTC connection is opened
         window.chessP2P.on('connected', ({ isHost }) => {
-            console.log('[App] P2P Connected callback! isHost =', isHost);
             modalWaiting.classList.remove('active');
             window.chessAudio.playNotify();
 
             if (isHost) {
-                // Host determines guest color
                 const guestColor = (myColor === 'w') ? 'b' : 'w';
-                console.log('[App] Host sending game-init to guest. guestColor =', guestColor);
-
                 const sendInit = () => {
                     window.chessP2P.send('game-init', {
                         guestColor: guestColor,
@@ -284,28 +442,14 @@
                 };
 
                 sendInit();
-                // Send twice with slight delay to guarantee delivery across initial WebRTC handshake
-                setTimeout(sendInit, 250);
+                setTimeout(sendInit, 200);
 
                 startNewGame('p2p-host', timeControl.baseMs, timeControl.incMs, myColor);
                 showToast('Соперник подключился! Партия началась.');
             }
         });
 
-        // Guest says hello
-        window.chessP2P.on('msg:guest-join', () => {
-            console.log('[App] Host received guest-join! Resending game-init...');
-            const guestColor = (myColor === 'w') ? 'b' : 'w';
-            window.chessP2P.send('game-init', {
-                guestColor: guestColor,
-                baseMs: timeControl.baseMs,
-                incMs: timeControl.incMs
-            });
-        });
-
-        // Guest receives configuration from host
         window.chessP2P.on('msg:game-init', (data) => {
-            console.log('[App] Guest received game-init:', data);
             myColor = data.guestColor;
             timeControl = { baseMs: data.baseMs, incMs: data.incMs };
 
@@ -314,9 +458,13 @@
             showToast(`Успешное подключение! Вы играете ${myColor === 'w' ? 'белыми' : 'черными'}.`);
         });
 
-        // Move received over P2P
+        // Chat Message Received
+        window.chessP2P.on('msg:chat', (data) => {
+            addMessageToChat(data.text, 'opponent', data.author || 'Соперник');
+        });
+
+        // Move Received
         window.chessP2P.on('msg:move', (data) => {
-            console.log('[App] Received move from opponent:', data);
             const move = chess.move({
                 from: data.from,
                 to: data.to,
@@ -324,14 +472,10 @@
             });
 
             if (move) {
-                if (data.clocks) {
-                    clocks = data.clocks;
-                }
+                if (data.clocks) clocks = data.clocks;
                 handleMoveSound(move);
                 onMoveComplete(move);
             } else if (data.fen) {
-                // Fallback sync if discrepancy
-                console.warn('[App] Move failed locally, syncing FEN:', data.fen);
                 chess.load(data.fen);
                 renderBoard();
                 updateStatus();
@@ -384,7 +528,6 @@
         });
 
         window.chessP2P.on('error', (err) => {
-            console.error('[App] P2P Error:', err);
             showToast(err);
             if (gameMode === 'connecting') {
                 statusBanner.className = 'status-banner alert-check';
@@ -397,7 +540,6 @@
        Game Flow & Board Logic
        ========================================================================== */
     function startNewGame(mode, baseMs, incMs, playerColor = 'w', difficulty = 'medium') {
-        console.log(`[App] startNewGame: mode=${mode}, color=${playerColor}, time=${baseMs}`);
         chess = new Chess();
         selectedSquare = null;
         validMoves = [];
@@ -427,7 +569,6 @@
             bottomClock.textContent = '∞';
         }
 
-        // If playing against AI and player is Black, AI makes first move as White
         if (gameMode === 'ai' && myColor === 'b') {
             triggerAiMove();
         }
@@ -448,7 +589,7 @@
             gameModeBadge.style.background = '#eab308';
             shareContainer.style.display = 'none';
         } else {
-            gameModeBadge.textContent = '🌐 P2P Онлайн';
+            gameModeBadge.textContent = '🌐 Онлайн';
             gameModeBadge.style.background = '#3b82f6';
             shareContainer.style.display = 'block';
         }
@@ -481,7 +622,6 @@
             bottomAvatar.textContent = '♟';
             topAvatar.textContent = '⏳';
         } else {
-            // Online P2P
             if (myColor === 'w') {
                 bottomName.textContent = 'Вы (Белые)';
                 topName.textContent = 'Соперник (Черные)';
@@ -528,7 +668,6 @@
                     sqEl.classList.add('in-check');
                 }
 
-                // Coordinates indicators
                 if ((!isFlipped && f === 0) || (isFlipped && f === 7)) {
                     const rankCoord = document.createElement('span');
                     rankCoord.className = 'coord coord-rank';
@@ -542,12 +681,11 @@
                     sqEl.appendChild(fileCoord);
                 }
 
-                // Piece
                 const piece = board[7 - r][f];
                 if (piece) {
                     const pieceEl = document.createElement('div');
                     pieceEl.className = 'piece';
-                    pieceEl.style.backgroundImage = `url('assets/pieces/${piece.color}${piece.type.toUpperCase()}.svg')`;
+                    pieceEl.style.backgroundImage = `url('${getPieceUrl(piece.color, piece.type)}')`;
                     pieceEl.draggable = isMyTurn() && canControlPiece(piece.color);
                     pieceEl.dataset.square = sqName;
 
@@ -555,7 +693,6 @@
                     sqEl.appendChild(pieceEl);
                 }
 
-                // Move hints
                 const moveHint = validMoves.find(m => m.to === sqName);
                 if (moveHint) {
                     const hintEl = document.createElement('div');
@@ -580,7 +717,7 @@
         if (gameMode === 'connecting') return false;
         if (gameMode === 'hotseat') return true;
         if (gameMode === 'ai') return pieceColor === myColor && !isAiThinking;
-        return pieceColor === myColor; // Online P2P
+        return pieceColor === myColor;
     }
 
     function isMyTurn() {
@@ -685,7 +822,7 @@
             const btn = document.createElement('button');
             btn.className = 'promo-piece-btn';
             const img = document.createElement('img');
-            img.src = `assets/pieces/${color}${ch.toUpperCase()}.svg`;
+            img.src = getPieceUrl(color, ch);
             btn.appendChild(img);
 
             btn.addEventListener('click', () => {
@@ -712,7 +849,6 @@
         selectedSquare = null;
         validMoves = [];
 
-        // Apply increment
         if (timeControl.baseMs > 0) {
             const prevPlayer = move.color;
             clocks[prevPlayer] += timeControl.incMs;
@@ -720,7 +856,6 @@
 
         handleMoveSound(move);
 
-        // Send move over P2P
         if (gameMode.startsWith('p2p')) {
             window.chessP2P.send('move', {
                 from: move.from,
@@ -733,7 +868,6 @@
 
         onMoveComplete(move);
 
-        // Check if AI turn next (ONLY in AI mode!)
         if (gameMode === 'ai' && !isGameOver && chess.turn() !== myColor) {
             triggerAiMove();
         }
@@ -829,7 +963,7 @@
 
     function renderHistory() {
         const history = chess.history();
-        movesCountEl.textContent = `${history.length} ${getNoun(history.length, 'ход', 'хода', 'ходов')}`;
+        movesCountEl.textContent = `(${history.length})`;
 
         historyTbody.innerHTML = '';
         for (let i = 0; i < history.length; i += 2) {
@@ -903,7 +1037,7 @@
         pieces.forEach(p => {
             const img = document.createElement('img');
             img.className = 'captured-piece-icon';
-            img.src = `assets/pieces/${p.color}${p.type.toUpperCase()}.svg`;
+            img.src = getPieceUrl(p.color, p.type);
             container.appendChild(img);
         });
 
@@ -1060,16 +1194,6 @@
             toast.style.transition = 'opacity 0.3s ease';
             setTimeout(() => toast.remove(), 300);
         }, 3500);
-    }
-
-    function getNoun(number, one, two, five) {
-        let n = Math.abs(number);
-        n %= 100;
-        if (n >= 5 && n <= 20) return five;
-        n %= 10;
-        if (n === 1) return one;
-        if (n >= 2 && n <= 4) return two;
-        return five;
     }
 
     window.addEventListener('DOMContentLoaded', init);

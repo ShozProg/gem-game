@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gem Chess — Шахматы онлайн (P2P) и с ботом</title>
-    <link rel="stylesheet" href="css/style.css">
+    <title>Gem Chess — Шахматы онлайн (P2P/WSS), бот и кастомизация</title>
+    <link rel="stylesheet" href="css/style.css?v=3">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💎</text></svg>">
 </head>
-<body>
+<body class="theme-wood">
 
     <!-- Header -->
     <header class="app-header">
@@ -16,6 +16,7 @@
             <h1>Gem Chess</h1>
         </div>
         <div class="header-actions">
+            <button class="btn btn-secondary" id="btn-theme-modal" title="Настроить фигуры и доску">🎨 Оформление</button>
             <button class="btn btn-secondary" id="btn-toggle-sound" title="Включить/выключить звук">🔊 Звук</button>
             <button class="btn btn-secondary" id="btn-flip-board" title="Развернуть доску">🔄 Развернуть</button>
             <button class="btn btn-primary" id="btn-new-game">🎮 Меню игры</button>
@@ -43,7 +44,7 @@
             </div>
 
             <!-- Chessboard -->
-            <div class="board-wrapper">
+            <div class="board-wrapper" id="board-wrapper">
                 <div class="chessboard" id="chessboard">
                     <!-- 64 squares generated via JS -->
                 </div>
@@ -72,7 +73,7 @@
             <div class="card">
                 <div class="card-title">
                     <span>Статус партии</span>
-                    <span id="game-mode-badge" style="font-size: 0.75rem; background: #3b82f6; padding: 2px 8px; border-radius: 12px;">Против бота</span>
+                    <span id="game-mode-badge" style="font-size: 0.75rem; background: #8b5cf6; padding: 2px 8px; border-radius: 12px;">Против бота</span>
                 </div>
                 <div class="status-banner" id="status-banner">
                     <span id="status-icon">⚪</span>
@@ -80,18 +81,65 @@
                 </div>
             </div>
 
-            <!-- Move History -->
-            <div class="card">
-                <div class="card-title">
-                    <span>История ходов</span>
-                    <span id="moves-count" style="font-size: 0.8rem; color: var(--text-secondary);">0 ходов</span>
+            <!-- Tabs Card (Moves & Chat) -->
+            <div class="card" style="padding: 12px 16px;">
+                <div class="sidebar-tabs">
+                    <button class="tab-btn active" id="tab-moves-btn">
+                        <span>📋 Ходы</span>
+                        <span id="moves-count" style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 4px;">(0)</span>
+                    </button>
+                    <button class="tab-btn" id="tab-chat-btn">
+                        <span>💬 Чат</span>
+                        <span class="tab-badge" id="chat-unread-badge">1</span>
+                    </button>
                 </div>
-                <div class="history-container" id="history-container">
-                    <table class="history-table">
-                        <tbody id="history-tbody">
-                            <!-- Moves rows -->
-                        </tbody>
-                    </table>
+
+                <!-- Pane 1: Moves History -->
+                <div class="tab-pane active" id="pane-moves">
+                    <div class="history-container" id="history-container">
+                        <table class="history-table">
+                            <tbody id="history-tbody">
+                                <!-- Moves rows injected here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Pane 2: Live Chat -->
+                <div class="tab-pane" id="pane-chat">
+                    <div class="chat-container" id="chat-container">
+                        <!-- Chat messages injected here -->
+                    </div>
+
+                    <!-- Quick Emojis -->
+                    <div class="quick-emojis">
+                        <button class="emoji-btn" data-emoji="👍">👍</button>
+                        <button class="emoji-btn" data-emoji="😂">😂</button>
+                        <button class="emoji-btn" data-emoji="👏">👏</button>
+                        <button class="emoji-btn" data-emoji="🎯">🎯</button>
+                        <button class="emoji-btn" data-emoji="🤔">🤔</button>
+                        <button class="emoji-btn" data-emoji="😱">😱</button>
+                        <button class="emoji-btn" data-emoji="🔥">🔥</button>
+                        <button class="emoji-btn" data-emoji="💎">💎</button>
+                        <button class="emoji-btn" data-emoji="♟️">♟️</button>
+                    </div>
+
+                    <!-- Quick Phrases -->
+                    <div class="quick-phrases">
+                        <button class="phrase-chip" data-phrase="Привет! 👋">Привет! 👋</button>
+                        <button class="phrase-chip" data-phrase="Удачи! 🍀">Удачи! 🍀</button>
+                        <button class="phrase-chip" data-phrase="Хороший ход! 👏">Хороший ход! 👏</button>
+                        <button class="phrase-chip" data-phrase="Думаю... 🤔">Думаю... 🤔</button>
+                        <button class="phrase-chip" data-phrase="Упс! 😅">Упс! 😅</button>
+                        <button class="phrase-chip" data-phrase="Красиво! 🔥">Красиво! 🔥</button>
+                        <button class="phrase-chip" data-phrase="Спасибо за игру! 🤝">Спасибо! 🤝</button>
+                    </div>
+
+                    <!-- Chat input bar -->
+                    <div class="chat-input-bar">
+                        <input type="text" class="chat-input" id="chat-text-input" placeholder="Напишите сообщение..." maxlength="120">
+                        <button class="btn btn-primary" id="btn-chat-send" style="padding: 8px 14px;">Отправить</button>
+                    </div>
                 </div>
             </div>
 
@@ -113,6 +161,75 @@
 
     </main>
 
+    <!-- Modal: Theme & Appearance -->
+    <div class="modal-overlay" id="modal-theme">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2>🎨 Оформление</h2>
+                <button class="modal-close" id="modal-theme-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                
+                <div class="form-group">
+                    <label>Стиль фигур (Piece Theme)</label>
+                    <div class="theme-options-grid" id="piece-theme-options">
+                        <div class="theme-card active" data-piece-theme="cburnett">
+                            <div class="theme-preview-pieces">
+                                <img src="assets/pieces/cburnett/wN.svg" alt="N">
+                                <img src="assets/pieces/cburnett/bQ.svg" alt="Q">
+                            </div>
+                            <span class="theme-name">Классика (Cburnett)</span>
+                        </div>
+                        <div class="theme-card" data-piece-theme="merida">
+                            <div class="theme-preview-pieces">
+                                <img src="assets/pieces/merida/wN.svg" alt="N">
+                                <img src="assets/pieces/merida/bQ.svg" alt="Q">
+                            </div>
+                            <span class="theme-name">Турнирный (Merida)</span>
+                        </div>
+                        <div class="theme-card" data-piece-theme="alpha">
+                            <div class="theme-preview-pieces">
+                                <img src="assets/pieces/alpha/wN.svg" alt="N">
+                                <img src="assets/pieces/alpha/bQ.svg" alt="Q">
+                            </div>
+                            <span class="theme-name">Модерн (Alpha)</span>
+                        </div>
+                        <div class="theme-card" data-piece-theme="dubrovny">
+                            <div class="theme-preview-pieces">
+                                <img src="assets/pieces/dubrovny/wN.svg" alt="N">
+                                <img src="assets/pieces/dubrovny/bQ.svg" alt="Q">
+                            </div>
+                            <span class="theme-name">Винтаж (Dubrovny)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-top: 6px;">
+                    <label>Цвет доски (Board Color)</label>
+                    <div class="board-swatches-grid" id="board-theme-swatches">
+                        <div class="board-swatch active" data-board-theme="wood" title="Классическое дерево">
+                            <div class="swatch-half" style="background: #ece0d1;"></div>
+                            <div class="swatch-half" style="background: #967259;"></div>
+                        </div>
+                        <div class="board-swatch" data-board-theme="emerald" title="Изумрудный">
+                            <div class="swatch-half" style="background: #ffffdd;"></div>
+                            <div class="swatch-half" style="background: #86a666;"></div>
+                        </div>
+                        <div class="board-swatch" data-board-theme="slate" title="Тёмный сланец">
+                            <div class="swatch-half" style="background: #dee3e6;"></div>
+                            <div class="swatch-half" style="background: #8ca2ad;"></div>
+                        </div>
+                        <div class="board-swatch" data-board-theme="gem" title="Неоновый Gem">
+                            <div class="swatch-half" style="background: #dbeafe;"></div>
+                            <div class="swatch-half" style="background: #3b82f6;"></div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
     <!-- Modal: New Game / Lobby -->
     <div class="modal-overlay" id="modal-lobby">
         <div class="modal-card">
@@ -126,7 +243,7 @@
                     <select class="select" id="select-game-mode">
                         <option value="ai" selected>🤖 Одиночная игра против бота (AI)</option>
                         <option value="hotseat">👥 Вдвоем на одном экране (Hotseat)</option>
-                        <option value="p2p-create">🌐 Создать онлайн-игру (P2P по ссылке)</option>
+                        <option value="p2p-create">🌐 Создать онлайн-игру (по ссылке)</option>
                         <option value="p2p-join">🔗 Присоединиться к онлайн-игре</option>
                     </select>
                 </div>
@@ -173,7 +290,7 @@
         </div>
     </div>
 
-    <!-- Modal: Waiting for Opponent (P2P Host) -->
+    <!-- Modal: Waiting for Opponent -->
     <div class="modal-overlay" id="modal-waiting">
         <div class="modal-card">
             <div class="modal-header">
@@ -228,9 +345,9 @@
 
     <!-- Scripts -->
     <script src="js/chess.min.js"></script>
-    <script src="js/audio.js?v=2"></script>
-    <script src="js/p2p.js?v=2"></script>
-    <script src="js/ai.js?v=2"></script>
-    <script src="js/app.js?v=2"></script>
+    <script src="js/audio.js?v=3"></script>
+    <script src="js/p2p.js?v=3"></script>
+    <script src="js/ai.js?v=3"></script>
+    <script src="js/app.js?v=3"></script>
 </body>
 </html>
